@@ -9,6 +9,7 @@
 
 #include <Adafruit_ESP8266.h>
 #include <SoftwareSerial.h>
+#include "conn_conf.h"
 
 #define ESP_RX   2
 #define ESP_TX   3
@@ -20,25 +21,28 @@ SoftwareSerial softser(ESP_RX, ESP_TX);
 Adafruit_ESP8266 wifi(&softser, &Serial, ESP_RST);
 // Must call begin() on the stream(s) before using Adafruit_ESP8266 object.
 
-#define ESP_SSID "HUB" // Your network name here
-#define ESP_PASS "IFeelGood" // Your network password here
 
 
+#define LED_OBSAZENO  13
+#define LED_VOLNO     12
+#define LED_WIFI_CONN 11
+#define LED_TCP_CONN  10
 
-#define HOST     "52.28.200.14"     // Host to contact
-#define PORT     9999                     // 80 = HTTP default port
 
-#define LED_PIN  13
 unsigned long previousMillis = 0;
 
-
 void setup() {
-  pinMode(12,OUTPUT);
+  pinMode(LED_VOLNO,OUTPUT);
+  pinMode(LED_WIFI_CONN,OUTPUT);
+  pinMode(LED_TCP_CONN,OUTPUT);
+  
   //dvoubarevna LED, spolecna anoda - zapojena proti +5V, pri HIGH nesviti, pri LOW sviti
-  digitalWrite(12, HIGH);
-  digitalWrite(13, HIGH);
-  
-  
+  digitalWrite(LED_OBSAZENO, HIGH);
+  digitalWrite(LED_VOLNO, HIGH);
+
+  //connection status LOW - connected, HIGH - disconnected
+  digitalWrite(LED_WIFI_CONN, HIGH);
+  digitalWrite(LED_TCP_CONN, HIGH);
   
   // comment/replace this if you are using something other than v 0.9.2.4!
   wifi.setBootMarker(F("Version:0.9.2.4]\r\n\r\nready"));
@@ -56,12 +60,12 @@ void setup() {
   }
   Serial.println(F("OK."));
 
-  //Serial.print(F("Soft reset..."));
-  //if(!wifi.softReset()) {
-  //  Serial.println(F("no response from module."));
-  //  for(;;);
-  //}
-  //Serial.println(F("OK."));
+  Serial.print(F("Soft reset..."));
+  if(!wifi.softReset()) {
+    Serial.println(F("no response from module."));
+    for(;;);
+  }
+  Serial.println(F("OK."));
 
 }
 
@@ -72,65 +76,91 @@ void loop() {
   
   Serial.print(F("Connecting to WiFi..."));
   if(wifi.connectToAP(F(ESP_SSID), F(ESP_PASS))) {
-
-    // IP addr check isn't part of library yet, but
-    // we can manually request and place in a string.
-    Serial.print(F("OK\nChecking IP addr..."));
-    wifi.println(F("AT+CIFSR"));
-    if(wifi.readLine(buffer, sizeof(buffer))) {
-      Serial.println(buffer);
-      wifi.find(); // Discard the 'OK' that follows
-
-      Serial.print(F("Connecting to host..."));
-      if(wifi.connectTCP(F(HOST), PORT)) {
-        while(true){
-          delay(100);
-          
-          data=(char)softser.read();
-         
-          while(data>0){
-            if(data=='\n'){
-              Serial.print(x);
-              x="";
-            }
-            x+=data;
-            
-            if (x.indexOf("volno")>=0){
-              Serial.println("ZELENA");
-              digitalWrite(13, HIGH); 
-              digitalWrite(12, LOW); 
+    digitalWrite(LED_WIFI_CONN, LOW);
+    while(true){
+        // IP addr check isn't part of library yet, but
+        // we can manually request and place in a string.
+        Serial.print(F("OK\nChecking IP addr..."));
+        wifi.println(F("AT+CIFSR"));
+        if(wifi.readLine(buffer, sizeof(buffer))) {
+          Serial.println(buffer);
+          wifi.find(); // Discard the 'OK' that follows
+    
+          Serial.print(F("Connecting to host..."));
+          if(wifi.connectTCP(F(HOST), PORT)) {
+            digitalWrite(LED_TCP_CONN, LOW);
+            while(true){
+              delay(100);
               
+              data=(char)softser.read();
+             
+              while(data>0){
+                if(data=='\n'){
+                  Serial.print(x);
+                  x="";
+                }
+                x+=data;
+                
+                if (x.indexOf("volno")>=0){
+                  Serial.println(F("ZELENA"));
+                  digitalWrite(LED_OBSAZENO, HIGH); 
+                  digitalWrite(LED_VOLNO, LOW); 
+                  
+                }
+                if (x.indexOf("obsazeno")>=0){
+                  Serial.println(F("CERVENA"));
+                  digitalWrite(LED_OBSAZENO, LOW);
+                  digitalWrite(LED_VOLNO, HIGH);
+                   
+                }
+                data=(char)softser.read();
+                  
+              }
+              if(millis()>previousMillis+2000){
+                previousMillis=millis();
+                wifi.println(F("AT+CIPSTATUS"));
+                if(!wifi.find(F("STATUS:3"))){
+                  break;
+                }
+              }
+             
             }
-            if (x.indexOf("obsazeno")>=0){
-              Serial.println("CERVENA");
-              digitalWrite(13, LOW);
-              digitalWrite(12, HIGH);
-               
-            }
-            data=(char)softser.read();
-              
+            wifi.closeTCP();
+            digitalWrite(LED_OBSAZENO, HIGH);
+            digitalWrite(LED_VOLNO, HIGH);
+            digitalWrite(LED_TCP_CONN, HIGH);
+          } else { // TCP connect failed
+            Serial.println(F("D'oh!"));
           }
-          if(millis()>previousMillis+10000){
+        } else { // IP addr check failed
+          Serial.println(F("error"));
+        }
+        if(millis()>previousMillis+10000){
             previousMillis=millis();
-            wifi.println(F("AT+CIPSTATUS"));
-            if(!wifi.find(F("STATUS:3"))){
+            wifi.println(F("AT+CWJAP?"));
+            if(!wifi.find(F(ESP_SSID))){
               break;
             }
-          }
-         
         }
-        wifi.closeTCP();
-      } else { // TCP connect failed
-        Serial.println(F("D'oh!"));
-      }
-    } else { // IP addr check failed
-      Serial.println(F("error"));
     }
     wifi.closeAP();
-    digitalWrite(12, HIGH);
-    digitalWrite(13, HIGH);
+    digitalWrite(LED_WIFI_CONN, HIGH);
   } else { // WiFi connection failed
     Serial.println(F("FAIL"));
+      // Test if module is ready
+    Serial.print(F("Hard reset..."));
+    if(!wifi.hardReset()) {
+      Serial.println(F("no response from module."));
+      for(;;);
+    }
+    Serial.println(F("OK."));
+  
+    Serial.print(F("Soft reset..."));
+    if(!wifi.softReset()) {
+      Serial.println(F("no response from module."));
+      for(;;);
+    }
+    Serial.println(F("OK."));
   }
-  delay(10000);
+  delay(2000);
 }
