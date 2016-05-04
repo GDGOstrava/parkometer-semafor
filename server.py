@@ -25,15 +25,27 @@ class ParkOmeterHandler(SocketServer.BaseRequestHandler):
         cur.execute("LISTEN semafor;")
         # just send back the same data, but upper-cased
         conn= self.server.db
+        i = 0
         while True:
             if select.select([conn],[],[],1) == ([],[],[]):
-                print "Timeout"
+                if (i % 60 == 0):
+                    print 'check db state'
+                    cur.execute("SELECT count(*) >= get_size_parking() FROM hub_parking WHERE parked;")
+                    full=cur.fetchone()[0]
+                    if full:
+                        self.server.parking_state = 'obsazeno\n';
+                    else:
+                        self.server.parking_state = 'volno\n';
+                i+=1
+                print 'sending last state:', self.server.parking_state,
+                self.request.sendall(self.server.parking_state)
             else:
                 conn.poll()
                 while conn.notifies:
                     notify = conn.notifies.pop(0)
                     print "Got NOTIFY:", notify.pid, notify.channel, notify.payload
-                    self.request.sendall(notify.payload+'\n')
+                    self.server.parking_state = notify.payload+'\n'
+                    self.request.sendall(self.server.parking_state)
 
             
 class ParkOmeterTCPServer(SocketServer.TCPServer):
@@ -42,6 +54,7 @@ class ParkOmeterTCPServer(SocketServer.TCPServer):
         SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass, bind_and_activate)
         self.db=psycopg2.extras.DictConnection(DB_STRING)
         self.db.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        self.parking_state = None
 
 if __name__ == "__main__":
 
@@ -51,4 +64,3 @@ if __name__ == "__main__":
     # Activate the server; this will keep running until you
     # interrupt the program with Ctrl-C
     server.serve_forever()
-    print 'test'
