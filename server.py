@@ -4,6 +4,7 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.extensions
 import select
+import socket
 
 from conn_conf import *
 
@@ -15,7 +16,8 @@ class ParkOmeterHandler(SocketServer.BaseRequestHandler):
     override the handle() method to implement communication to the
     client.
     """
-
+    def server_activate(self):
+        self.server.listen(5)
 
     def handle(self):
         # self.request is the TCP socket connected to the client
@@ -25,6 +27,7 @@ class ParkOmeterHandler(SocketServer.BaseRequestHandler):
         cur.execute("LISTEN semafor;")
         # just send back the same data, but upper-cased
         conn= self.server.db
+        self.request.settimeout(10)
         i = 0
         while True:
             if select.select([conn],[],[],1) == ([],[],[]):
@@ -47,7 +50,9 @@ class ParkOmeterHandler(SocketServer.BaseRequestHandler):
                     self.server.parking_state = notify.payload+'\n'
                     self.request.sendall(self.server.parking_state)
 
-            
+    def handle_timeout(self):
+        raise Exception('timeout')
+           
 class ParkOmeterTCPServer(SocketServer.TCPServer):
 
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
@@ -59,8 +64,17 @@ class ParkOmeterTCPServer(SocketServer.TCPServer):
 if __name__ == "__main__":
 
     # Create the server, binding to localhost on port 9999
-    server = ParkOmeterTCPServer((HOST, PORT), ParkOmeterHandler)
+    while True:
+        try:
+            server = ParkOmeterTCPServer((HOST, PORT), ParkOmeterHandler)
+            server.allow_reuse_address = True
+            server.timeout = 10
+            # Activate the server; this will keep running until you
+            # interrupt the program with Ctrl-C
+            while True:
+                server.handle_request()
+            #server.serve_forever()
 
-    # Activate the server; this will keep running until you
-    # interrupt the program with Ctrl-C
-    server.serve_forever()
+        except socket.error, e:
+            print str(e)
+            time.sleep(1)
